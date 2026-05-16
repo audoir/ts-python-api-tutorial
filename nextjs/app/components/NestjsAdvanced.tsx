@@ -5,7 +5,7 @@ import { useState } from "react";
 const NESTJS_API = "http://localhost:3002";
 const API_KEY = "secret-key-123";
 
-type DemoSection = "public" | "guard";
+type DemoSection = "public" | "guard" | "di";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -55,6 +55,10 @@ export default function NestjsAdvanced() {
   const [guardResult, setGuardResult] = useState<string | null>(null);
   const [guardLoading, setGuardLoading] = useState(false);
 
+  // ── DI demo state ──
+  const [diResult, setDiResult] = useState<string | null>(null);
+  const [diLoading, setDiLoading] = useState(false);
+
   // ─── Handlers ──────────────────────────────────────────────────────────────
 
   async function fetchPublic() {
@@ -87,11 +91,26 @@ export default function NestjsAdvanced() {
     }
   }
 
+  async function fetchDi() {
+    setDiLoading(true);
+    setDiResult(null);
+    try {
+      const res = await fetch(`${NESTJS_API}/api/advanced/di`);
+      const data = await res.json();
+      setDiResult(JSON.stringify(data, null, 2));
+    } catch {
+      setDiResult("Error: could not reach NestJS server");
+    } finally {
+      setDiLoading(false);
+    }
+  }
+
   // ─── Render ────────────────────────────────────────────────────────────────
 
   const sectionTabs: { id: DemoSection; label: string }[] = [
     { id: "public", label: "🌐 Public Endpoint" },
     { id: "guard", label: "🔑 API Key Guard" },
+    { id: "di", label: "🧩 Dependency Injection" },
   ];
 
   return (
@@ -201,6 +220,98 @@ export class AdvancedController { ... }
             {guardLoading ? "Loading…" : "GET /api/advanced/guarded"}
           </button>
           {guardResult && <CodeBlock code={guardResult} />}
+        </div>
+      )}
+
+      {/* ── Dependency Injection Demo ── */}
+      {activeSection === "di" && (
+        <div className="bg-white dark:bg-zinc-800 rounded-xl shadow p-6 flex flex-col gap-4">
+          <SectionHeader
+            title="Dependency Injection — Swappable Implementations"
+            badge="@Injectable() + useClass"
+            description="Program to an abstract class (the contract), then bind a concrete implementation in the module. Swap the implementation by changing one line in AppModule — the controller never changes."
+          />
+
+          {/* Step 1 — abstract contract */}
+          <p className="text-xs font-semibold uppercase tracking-wide text-purple-500 dark:text-purple-400">
+            Step 1 — Define the contract (abstract class)
+          </p>
+          <CodeBlock
+            code={`// abstract class acts as both the type and the DI token
+export abstract class GreetingService {
+  abstract getRandomGreeting(): string;
+  abstract getStats(): { implementation: string; greetings: string[] };
+}`}
+          />
+
+          {/* Step 2 — two implementations */}
+          <p className="text-xs font-semibold uppercase tracking-wide text-purple-500 dark:text-purple-400">
+            Step 2 — Two concrete implementations
+          </p>
+          <CodeBlock
+            code={`@Injectable()
+export class HumanGreetingService extends GreetingService {
+  private readonly greetings = ['Hello', 'Hola', 'Bonjour', 'Ciao', 'こんにちは'];
+  getRandomGreeting() { return this.greetings[Math.floor(Math.random() * this.greetings.length)]; }
+  getStats() { return { implementation: 'HumanGreetingService', greetings: this.greetings }; }
+}
+
+@Injectable()
+export class FictionalGreetingService extends GreetingService {
+  private readonly greetings = ["Qapla'", 'Shaka, when the walls fell', 'Hodor', 'Bazinga'];
+  getRandomGreeting() { return this.greetings[Math.floor(Math.random() * this.greetings.length)]; }
+  getStats() { return { implementation: 'FictionalGreetingService', greetings: this.greetings }; }
+}`}
+          />
+
+          {/* Step 3 — module wiring */}
+          <p className="text-xs font-semibold uppercase tracking-wide text-purple-500 dark:text-purple-400">
+            Step 3 — Bind the implementation in AppModule
+          </p>
+          <CodeBlock
+            code={`@Module({
+  providers: [
+    {
+      provide: GreetingService,          // ← the abstract token
+      useClass: HumanGreetingService,    // ← swap to FictionalGreetingService here
+    },
+  ],
+})
+export class AppModule {}`}
+          />
+
+          {/* Step 4 — controller unchanged */}
+          <p className="text-xs font-semibold uppercase tracking-wide text-purple-500 dark:text-purple-400">
+            Step 4 — Controller stays identical regardless of which implementation is active
+          </p>
+          <CodeBlock
+            code={`@Controller('api/advanced')
+export class AdvancedController {
+  constructor(private greetingService: GreetingService) {} // ← abstract type only
+
+  @Get('di')
+  @Public()
+  dependencyInjectionDemo() {
+    return {
+      greeting: this.greetingService.getRandomGreeting(), // works with either impl
+      ...this.greetingService.getStats(),
+    };
+  }
+}`}
+          />
+
+          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg px-4 py-3 text-xs text-amber-800 dark:text-amber-300">
+            💡 The server is currently wired to <strong>HumanGreetingService</strong>. To see the swap in action, change <code>useClass</code> in <code>nestjs/src/app.module.ts</code> to <code>FictionalGreetingService</code> and restart the NestJS server.
+          </div>
+
+          <button
+            onClick={fetchDi}
+            disabled={diLoading}
+            className="self-start bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-medium rounded-lg px-5 py-2 transition-colors"
+          >
+            {diLoading ? "Loading…" : "GET /api/advanced/di"}
+          </button>
+          {diResult && <CodeBlock code={diResult} />}
         </div>
       )}
     </div>

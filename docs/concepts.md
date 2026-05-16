@@ -234,11 +234,114 @@ export class UserController {
 }
 ```
 
-**Why does this matter?**
+**Why does this matter?** The difference becomes clear when you need to swap an implementation — for example, switching from a real email service to a fake one for testing, or switching from one greeting strategy to another.
 
-- **Testability** — you can easily swap `EmailService` for a mock in tests without changing `UserController`.
-- **Flexibility** — you can replace one implementation with another (e.g. swap a real database service for an in-memory one) in a single place.
-- **Decoupling** — classes don't need to know how to construct their dependencies.
+#### Without DI — manual wiring (like Express)
+
+You can still define an abstract `EmailService` and two concrete implementations — that's just good object-oriented design. The problem is that *someone* has to call `new ConcreteClass()`, and that decision is buried inside each class that needs the dependency. To swap the implementation you have to edit every class that constructs it:
+
+```ts
+// The abstract contract and two implementations — same as the DI version
+abstract class EmailService {
+  abstract send(to: string, body: string): void;
+}
+
+class SmtpEmailService extends EmailService {
+  send(to: string, body: string) { /* calls real SMTP server */ }
+}
+
+class FakeEmailService extends EmailService {
+  send(to: string, body: string) { console.log(`[FAKE] To: ${to} — ${body}`); }
+}
+
+// Without DI — WelcomeService must pick a concrete class itself
+class WelcomeService {
+  private emailService: EmailService;
+
+  constructor() {
+    // ↓ Hard-coded choice. To use FakeEmailService you must edit this file.
+    this.emailService = new SmtpEmailService();
+  }
+
+  welcome(user: string) {
+    this.emailService.send(user, "Welcome!");
+  }
+}
+
+class UserController {
+  private welcomeService: WelcomeService;
+
+  constructor() {
+    this.welcomeService = new WelcomeService(); // ← also hard-coded
+  }
+
+  register(user: string) {
+    this.welcomeService.welcome(user);
+  }
+}
+
+// To swap SmtpEmailService → FakeEmailService you must open WelcomeService and
+// change the `new` call. If ten other classes also do `new SmtpEmailService()`,
+// you have to find and edit all ten.
+const controller = new UserController();
+```
+
+#### With DI — NestJS handles the wiring
+
+Classes declare what they need; the IoC container creates and injects the right instance. To swap the implementation, you change **one line** in the module — nothing else:
+
+```ts
+// With DI — declare the contract (abstract class = the token)
+abstract class EmailService {
+  abstract send(to: string, body: string): void;
+}
+
+// Implementation A — real SMTP
+@Injectable()
+class SmtpEmailService extends EmailService {
+  send(to: string, body: string) { /* calls real SMTP server */ }
+}
+
+// Implementation B — fake for tests / local dev
+@Injectable()
+class FakeEmailService extends EmailService {
+  send(to: string, body: string) { console.log(`[FAKE] To: ${to} — ${body}`); }
+}
+
+// WelcomeService and UserController never change — they only know about the abstract type
+@Injectable()
+class WelcomeService {
+  constructor(private emailService: EmailService) {} // ← injected automatically
+  welcome(user: string) { this.emailService.send(user, "Welcome!"); }
+}
+
+@Controller("users")
+class UserController {
+  constructor(private welcomeService: WelcomeService) {} // ← injected automatically
+  register(user: string) { this.welcomeService.welcome(user); }
+}
+
+// Swap the implementation here — nowhere else
+@Module({
+  controllers: [UserController],
+  providers: [
+    WelcomeService,
+    {
+      provide: EmailService,
+      useClass: SmtpEmailService,   // ← change to FakeEmailService for tests
+    },
+  ],
+})
+export class AppModule {}
+```
+
+The key insight: `WelcomeService` and `UserController` are completely unaware of whether they're talking to `SmtpEmailService` or `FakeEmailService`. The module is the only place that knows — and it's the only place you need to change.
+
+**Summary of benefits:**
+
+- **Testability** — swap `SmtpEmailService` for `FakeEmailService` in one place; no class edits needed.
+- **Flexibility** — replace any implementation (e.g. swap a real database service for an in-memory one) without touching the classes that use it.
+- **Decoupling** — classes don't know how to construct their dependencies, and don't care which concrete class they get.
 
 DI is a first-class feature in **NestJS**. The other frameworks in this tutorial (Express, Flask, FastAPI) do not have a built-in DI container — you wire dependencies manually.
 

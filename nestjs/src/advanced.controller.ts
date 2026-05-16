@@ -14,6 +14,58 @@ import {
 import { Reflector } from "@nestjs/core";
 import { Observable, map } from "rxjs";
 
+// ─── 0. Dependency Injection Example ─────────────────────────────────────────
+//
+// Pattern: program to an interface, swap the implementation in the module.
+// The controller never changes — only the provider registration in AppModule does.
+
+// Abstract interface (the "contract")
+export abstract class GreetingService {
+  abstract getRandomGreeting(): string;
+  abstract getStats(): { implementation: string; totalGreetings: number; greetings: string[] };
+}
+
+// Implementation A — human languages
+@Injectable()
+export class HumanGreetingService extends GreetingService {
+  private readonly greetings = ["Hello", "Hola", "Bonjour", "Ciao", "こんにちは"];
+
+  getRandomGreeting(): string {
+    return this.greetings[Math.floor(Math.random() * this.greetings.length)];
+  }
+
+  getStats() {
+    return {
+      implementation: "HumanGreetingService",
+      totalGreetings: this.greetings.length,
+      greetings: this.greetings,
+    };
+  }
+}
+
+// Implementation B — fictional / sci-fi languages
+@Injectable()
+export class FictionalGreetingService extends GreetingService {
+  private readonly greetings = ["Qapla'", "Shaka, when the walls fell", "Hodor", "Bazinga", "Expecto Patronum"];
+
+  getRandomGreeting(): string {
+    return this.greetings[Math.floor(Math.random() * this.greetings.length)];
+  }
+
+  getStats() {
+    return {
+      implementation: "FictionalGreetingService",
+      totalGreetings: this.greetings.length,
+      greetings: this.greetings,
+    };
+  }
+}
+
+// The token used to register the active implementation in AppModule.
+// Swap `HumanGreetingService` ↔ `FictionalGreetingService` there — nothing
+// else in the codebase needs to change.
+export const GREETING_SERVICE_TOKEN = GreetingService;
+
 // ─── 1. Custom Guard ─────────────────────────────────────────────────────────
 
 const IS_PUBLIC_KEY = "isPublic";
@@ -76,7 +128,12 @@ export class WrapResponseInterceptor<T>
 @UseGuards(ApiKeyGuard)
 @UseInterceptors(WrapResponseInterceptor)
 export class AdvancedController {
-  constructor(private reflector: Reflector) {}
+  // NestJS injects both Reflector and GreetingService via the constructor.
+  // No manual instantiation needed — the IoC container handles it.
+  constructor(
+    private reflector: Reflector,
+    private greetingService: GreetingService
+  ) {}
 
   // GET /api/advanced/public — no API key required (Public decorator)
   @Get("public")
@@ -101,4 +158,15 @@ export class AdvancedController {
     };
   }
 
+  // GET /api/advanced/di — demonstrates dependency injection with swappable implementations
+  @Get("di")
+  @Public()
+  dependencyInjectionDemo() {
+    return {
+      message: "Dependency Injection in action!",
+      greeting: this.greetingService.getRandomGreeting(),
+      ...this.greetingService.getStats(),
+      tip: "Change `useClass` in AppModule from HumanGreetingService to FictionalGreetingService — the controller code stays identical.",
+    };
+  }
 }
